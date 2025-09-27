@@ -7,8 +7,8 @@ import time
 from scipy.optimize import fsolve
 
 NETWORK_ID: int = 0x01
-private_key_list = #use your own private key here
-ORACLE_ADDRESS = "component_rdx1czc98y36sjzn3rzf60rjdc2ks33zlpn8lkv5nc7z30amhxzslccyvs"
+private_key_list = [] # use your own private key here
+ORACLE_ADDRESS = "component_rdx1czts0kqpakz58z7vxdnph6qpe2xw7ufz4894ev0rv522r56jr3ksfc"
 REWARD_ACCOUNT_ADDRESS = "account_rdx12xl2meqtelz47mwp3nzd72jkwyallg5yxr9hkc75ac4qztsxulfpew"
 PROXY_ADDRESS = "component_rdx1cqecl844an5n8w7dpelwr6mxrgad2kzj57nl5064q64wxwyxaxxpuk"
 DAO_ADDRESS = "component_rdx1cpj9kwxx4dqxu797dhkvtskhlxvxajl6ztkktxl9atqdtcqefk9dnh"
@@ -23,9 +23,9 @@ FEE = 0.001
 
 
 if NETWORK_ID == 0x02:
-    url = #morpher price request for stokenet back-end endpoint
+    url = 'somelink' #morpher price request for stokenet back-end endpoint
 else:
-    url = #morpher price request for mainnet back-end endpoint
+    url = 'somelink' #morpher price request for mainnet back-end endpoint
 
 import requests
 
@@ -56,12 +56,10 @@ class GatewayApiClient:
             raise
 
     @staticmethod
-    def get_entity_details(proxy_address: str, pool_address: str) -> dict:
+    def get_entity_details(addresses) -> dict:
         try:
             payload = {
-                "addresses": [
-                    POOL_ADDRESS, PROXY_ADDRESS
-                ],
+                "addresses": addresses,
                 "aggregation_level": "Vault"
             }
             response = requests.post(f"{GatewayApiClient.BASE_URL}/state/entity/details", json=payload)
@@ -109,7 +107,7 @@ class GatewayApiClient:
                 "signer_public_keys": [
                     {
                         "key_type": "EcdsaSecp256k1",
-                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06"
+                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06" #try and hack me, this is just a random pk :)
                     }
                 ],
                 "flags": {
@@ -170,7 +168,7 @@ class GatewayApiClient:
                 "signer_public_keys": [
                     {
                         "key_type": "EcdsaSecp256k1",
-                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06"
+                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06" #try and hack me, this is just a random pk :)
                     }
                 ],
                 "flags": {
@@ -219,7 +217,43 @@ class GatewayApiClient:
                 "signer_public_keys": [
                     {
                         "key_type": "EcdsaSecp256k1",
-                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06"
+                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06" #try and hack me, this is just a random pk :)
+                    }
+                ],
+                "flags": {
+                    "use_free_credit": True,
+                    "assume_all_signature_proofs": True,
+                    "skip_epoch_check": True,
+                    "disable_auth_checks": True
+                }
+            }
+
+            # Send the POST request
+            response = requests.post(f"{GatewayApiClient.BASE_URL}/transaction/preview", json=payload)
+            response.raise_for_status()  # Raise an error for bad status codes
+            response_data = response.json()
+
+            return response_data
+        except Exception as e:
+            print(f"Error previewing transaction: {e}")
+            raise
+    def preview_tx(manifest) -> dict:
+        try:
+            current_epoch = GatewayApiClient.current_epoch()
+            start_epoch_inclusive = current_epoch
+            end_epoch_exclusive = current_epoch + 2
+
+            # JSON payload
+            payload = {
+                "manifest": manifest,
+                "start_epoch_inclusive": start_epoch_inclusive,
+                "end_epoch_exclusive": end_epoch_exclusive,
+                "tip_percentage": 0,
+                "nonce": 1,
+                "signer_public_keys": [
+                    {
+                        "key_type": "EcdsaSecp256k1",
+                        "key_hex": "0305684de356f5126befda977935827f6f74ca3b7865cd8516ca72ef7afc8c0e06" #try and hack me, this is just a random pk :)
                     }
                 ],
                 "flags": {
@@ -342,7 +376,8 @@ def extract_resource_amounts(response_data):
 def arbitrage(xrd_price, account_address, private_key, public_key):
     print("we traging")
     fee = FEE
-    stab_state = GatewayApiClient.get_entity_details(PROXY_ADDRESS, POOL_ADDRESS)
+    addresses = [PROXY_ADDRESS, POOL_ADDRESS]
+    stab_state = GatewayApiClient.get_entity_details(addresses)
     output_reserves, input_reserves = get_pool_amounts(stab_state)
     stab_internal_price = get_stab_internal_price(stab_state)
 
@@ -425,6 +460,11 @@ def arbitrage(xrd_price, account_address, private_key, public_key):
             []
         )
         manifest.statically_validate()
+
+        success_data = GatewayApiClient.preview_tx(manifest_string)
+
+        if success_data['receipt']['status'] != "Succeeded":
+            return
 
         current_epoch: int = GatewayApiClient.current_epoch()
         transaction: NotarizedTransaction = (
@@ -631,6 +671,7 @@ def lambda_handler(event, context):
         print(f"Private key is associated with the account: {account_address.as_str()}")
 
         price_data, signature, xrd_price = get_xrd_price()
+        xrd_price = float(xrd_price)
 
         manifest_string: str = f"""
             CALL_METHOD
@@ -690,15 +731,25 @@ def lambda_handler(event, context):
 
         transaction_id: TransactionHash = transaction.intent_hash()
 
-        response = GatewayApiClient.submit_transaction(transaction)
+        oracle_state = GatewayApiClient.get_entity_details([ORACLE_ADDRESS])
+        last_price = float(oracle_state['items'][0]['details']['state']['fields'][0]['elements'][0]['fields'][1]['value'])
+        last_update = int(oracle_state['items'][0]['details']['state']['fields'][0]['elements'][0]['fields'][2]['value'])
+        time_since_last_update = int(time.time()) - last_update
 
-        arbitrage(xrd_price, account_address, private_key, public_key)
+        print(time_since_last_update)
+        print(last_price * 0.01)
+        print(abs(xrd_price - last_price))
+
+        if time_since_last_update > 57600 or last_price * 0.01 < abs(xrd_price - last_price):
+            print("donezo")
+            response = GatewayApiClient.submit_transaction(transaction)
+
+        #arbitrage(xrd_price, account_address, private_key, public_key)
         do_markings(account_address, private_key, public_key)
         do_liquidations(account_address, private_key, public_key)
 
         return {
             "Transaction ID": transaction_id.as_str(),
-            "Response": response
         }
 
     except Exception as e:
